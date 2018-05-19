@@ -1,12 +1,11 @@
 source('model.R')
 
-ds <- c('GWAS/parkinsons_disease.txt','GWAS/rheumatoid_arthritis.txt','GWAS/crohns_disease.txt','GWAS/ulcerative_colitis.txt',
-        'GWAS/coronary_artery_disease.txt','GWAS/type_2_diabetes.txt')
-ds2 <- c('PD','RA','CD','UC','CAD','T2D')
+cancer_name <- c('GWAS/breast_cancer.txt','GWAS/ovarian_cancer.txt','GWAS/lung_cancer.txt','GWAS/prostate_cancer.txt')
+cancer_short <- c('BC','OC','LC','PC')
 
-for(i in 1:6){
+for(i in 1:4){
   
-  data <- read.table(ds[i],header=T,stringsAsFactors = F)
+  data <- read.table(cancer_name[i],header=T,stringsAsFactors = F)
   data <- data[,c('gene_symbol','pvalue')]
   pvalues <- data[,2]
   
@@ -72,7 +71,7 @@ for(i in 1:6){
   result <- model.LR(pvalues, as.matrix(fused.v), verbose = T)
   data[,'Score'] <- result$post
   Result <- data[order(data[,'Score'],decreasing = T),]
-  save(Result, file = sprintf('result/%s.fused.bin',ds2[i]))
+  save(Result, file = sprintf('result/%s.fused.bin',cancer_short[i]))
 }
 
 

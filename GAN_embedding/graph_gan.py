@@ -15,29 +15,24 @@ import time
 import os
 import multiprocessing
 import config
-import evaluation.eval_link_prediction as elp
-
 
 class GraphGan(object):
     def __init__(self):
         """initialize the parameters, prepare the data and build the network"""
 
-        self.n_node, self.linked_nodes = utils.read_edges(config.train_filename, config.test_filename)
+        self.n_node, self.linked_nodes = utils.read_edges(config.gene_network_filename)
         self.root_nodes = [i for i in range(self.n_node)]
         self.discriminator = None
         self.generator = None
         assert self.n_node == config.n_node
         print("start reading initial embeddings")
         # read the initial embeddings
-        self.node_embed_init_d = utils.read_emd(filename=config.pretrain_emd_filename_d, n_node=config.n_node, n_embed=config.n_embed)
-        self.node_embed_init_g = utils.read_emd(filename=config.pretrain_emd_filename_g, n_node=config.n_node, n_embed=config.n_embed)
+        self.node_embed_init_d = utils.read_emd(filename=config.pretrain_emd_filename, n_node=config.n_node, n_embed=config.n_embed)
+        self.node_embed_init_g = utils.read_emd(filename=config.pretrain_emd_filename, n_node=config.n_node, n_embed=config.n_embed)
         print("finish reading initial embeddings")
+
         # use the BFS to construct the trees
-        print("Constructing Trees")
-        if config.app == "recommendation":
-            self.mul_construct_trees_for_recommend(self.user_nodes)
-        else:  # classification
-            self.mul_construct_trees(self.root_nodes)
+        self.mul_construct_trees(self.root_nodes)
         config.max_degree = utils.get_max_degree(self.linked_nodes)
         self.build_gan()
         self.config = tf.ConfigProto()
@@ -196,10 +191,10 @@ class GraphGan(object):
         self.saver = tf.train.Saver()
 
     def generate_for_d(self):
-        """Generate the pos and neg samples for the Discriminator, and record them in the txt file"""
+        """Generate the pos and neg samples for the Discriminator"""
 
-        self.samples_rel = []
-        self.samples_q = []
+        self.samples_fake = []
+        self.samples_real = []
         self.samples_label = []
         all_score = self.sess.run(self.generator.all_score)
         for u in self.root_nodes:
@@ -207,15 +202,15 @@ class GraphGan(object):
                 pos = self.linked_nodes[u]  # pos samples
                 if len(pos) < 1:
                     continue
-                self.samples_rel.extend(pos)
+                self.samples_fake.extend(pos)
                 self.samples_label.extend(len(pos) * [1])
-                self.samples_q.extend(len(pos) * [u])
+                self.samples_real.extend(len(pos) * [u])
                 neg = self.sample_for_gan(u, self.trees[u], len(pos), all_score, sample_for_dis=True)
                 if len(neg) < len(pos):
                     continue
-                self.samples_rel.extend(neg)
+                self.samples_fake.extend(neg)
                 self.samples_label.extend(len(neg)*[0])
-                self.samples_q.extend(len(pos) * [u])
+                self.samples_real.extend(len(pos) * [u])
 
     def get_batch_data(self, index, size):
         """ take out sample of size from the samples
@@ -224,11 +219,11 @@ class GraphGan(object):
             size: the number of the batch, may not equal to batch size
         """
 
-        q_node = self.samples_q[index:index+size]
-        rel_node = self.samples_rel[index:index+size]
+        real_node = self.samples_real[index:index+size]
+        fake_node = self.samples_fake[index:index+size]
         label = self.samples_label[index:index+size]
 
-        return q_node, rel_node, label
+        return real_node, fake_node, label
 
     def train_gan(self):
         """train the whole graph gan network"""
@@ -239,9 +234,9 @@ class GraphGan(object):
         if ckpt and ckpt.model_checkpoint_path and config.load_model:
             print("Load the checkpoint: %s" % ckpt.model_checkpoint_path)
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
-        print("Evaluation")
+
         self.write_emb_to_txt()
-        self.eval_test()  # evaluation
+
         for epoch in tqdm.tqdm(range(config.max_epochs)): # outer_loop
             #  save the model
             if epoch % config.save_steps == 0 and epoch > 0:
@@ -251,25 +246,25 @@ class GraphGan(object):
             for d_epoch in tqdm.tqdm(range(config.max_epochs_dis)):
                 if d_epoch % config.gen_for_d_iters == 0:  # every gen_for_d_iters round, we generate new data
                     self.generate_for_d()
-                train_size = len(self.samples_q)
+                train_size = len(self.samples_real)
                 #  traverse the whole training dataset sequentially, train the discriminator
                 index = 0
                 while True:
                     if index > train_size:
                         break
                     if index + config.batch_size_dis <= train_size + 1:
-                        input_q_node, input_rel_node, input_label = self.get_batch_data(index, config.batch_size_dis)
+                        input_real_node, input_fake_node, input_label = self.get_batch_data(index, config.batch_size_dis)
                     else:
-                        input_q_node, input_rel_node, input_label = self.get_batch_data(index, train_size - index)
+                        input_real_node, input_fake_node, input_label = self.get_batch_data(index, train_size - index)
                     index += config.batch_size_dis
-                    _, loss = self.sess.run([self.discriminator.d_updates, self.discriminator.pre_loss], {self.discriminator.q_node: np.array(input_q_node),\
-                                      self.discriminator.rel_node: np.array(input_rel_node), self.discriminator.label: np.array(input_label)})
+                    _, loss = self.sess.run([self.discriminator.d_updates, self.discriminator.pre_loss], {self.discriminator.real_node: np.array(input_real_node),\
+                                      self.discriminator.fake_node: np.array(input_fake_node), self.discriminator.label: np.array(input_label)})
 
             for g_epoch in tqdm.tqdm(range(config.max_epochs_gen)):
                 cnt = 0
                 root_nodes = []  # just for record how many trees that have been traversed
-                rel_nodes = []  # the sample nodes of the root node
-                root_nodes_gen = []  # root node feeds into the network, same length as rel_node
+                fake_nodes = []  # the sample nodes of the root node
+                root_nodes_gen = []  # root node feeds into the network, same length as fake_node
                 trace = []  # the trace when sampling the nodes, from the root to leaf  bach to leaf's father. e.g.: 0 - 1 - 2 -1
                 all_score = self.sess.run(self.generator.all_score)  # compute the score for computing the probability when sampling nodes
                 for root_node in tqdm.tqdm(self.root_nodes, mininterval=3):  # random update trees
@@ -277,26 +272,26 @@ class GraphGan(object):
                         # sample the nodes according to our method.
                         # feed the reward from the discriminator and the sampled nodes to the generator.
                         if cnt % config.gen_update_iter == 0 and cnt > 0:
-                            # generate update pairs along the path, [q_node, rel_node]
+                            # generate update pairs along the path, [real_node, fake_node]
                             pairs = list(map(self.generate_window_pairs, trace))  # [[], []] each list contains the pairs along the same path
-                            q_node_gen = []
-                            rel_node_gen = []
+                            real_node_gen = []
+                            fake_node_gen = []
                             for ii in range(len(pairs)):
                                 path_pairs = pairs[ii]
                                 for pair in path_pairs:
-                                    q_node_gen.append(pair[0])
-                                    rel_node_gen.append(pair[1])
+                                    real_node_gen.append(pair[0])
+                                    fake_node_gen.append(pair[1])
                             reward_gen, node_embed = self.sess.run([self.discriminator.score, self.discriminator.node_embed],
-                                                       {self.discriminator.q_node: np.array(q_node_gen),
-                                                        self.discriminator.rel_node: np.array(rel_node_gen)})
+                                                       {self.discriminator.real_node: np.array(real_node_gen),
+                                                        self.discriminator.fake_node: np.array(fake_node_gen)})
 
-                            feed_dict = {self.generator.q_node: np.array(q_node_gen), self.generator.rel_node: np.array(rel_node_gen),
+                            feed_dict = {self.generator.real_node: np.array(real_node_gen), self.generator.fake_node: np.array(fake_node_gen),
                                          self.generator.reward: reward_gen}
                             _, loss, prob = self.sess.run([self.generator.gan_updates, self.generator.gan_loss, self.generator.i_prob],
                                                           feed_dict=feed_dict)
                             all_score = self.sess.run(self.generator.all_score)
                             root_nodes = []
-                            rel_nodes = []
+                            fake_nodes = []
                             root_nodes_gen = []
                             trace = []
                             cnt = 0
@@ -306,13 +301,12 @@ class GraphGan(object):
                             continue
                         root_nodes.append(root_node)
                         root_nodes_gen.extend(len(sample)*[root_node])
-                        rel_nodes.extend(sample)
+                        fake_nodes.extend(sample)
                         trace.extend(self.trace)
                         cnt = cnt + 1
 
-            print("Evaluation")
             self.write_emb_to_txt()
-            self.eval_test()  # evaluation
+
 
     def generate_window_pairs(self, sample_path):
         """
@@ -356,21 +350,6 @@ class GraphGan(object):
                 f.writelines(lines)
 
 
-    def eval_test(self):
-        """do the evaluation when training
-
-        :return:
-        """
-        results = []
-        if config.app == "link_prediction":
-            for i in range(2):
-                LPE = elp.LinkPredictEval(config.emb_filenames[i], config.test_filename, config.test_neg_filename, config.n_node, config.n_embed)
-                result = LPE.eval_link_prediction()
-                results.append(config.modes[i] + ":" + str(result) + "\n")
-
-
-        with open(config.result_filename, mode="a+") as f:
-            f.writelines(results)
 
 if __name__ == "__main__": 
     g_g = GraphGan()

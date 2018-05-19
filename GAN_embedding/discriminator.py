@@ -13,16 +13,21 @@ class Discriminator():
                                               initializer=tf.constant_initializer(self.node_emd_init), trainable=True)
             self.node_b = tf.Variable(tf.zeros([self.n_node]))
 
-        self.q_node = tf.placeholder(tf.int32)
-        self.rel_node = tf.placeholder(tf.int32)
+        # placeholder
+        self.real_node = tf.placeholder(tf.int32)
+        self.fake_node = tf.placeholder(tf.int32)
         self.label = tf.placeholder(tf.float32)
-        self.q_embedding = tf.nn.embedding_lookup(self.node_embed, self.q_node)
-        self.rel_embedding = tf.nn.embedding_lookup(self.node_embed, self.rel_node)
-        self.i_bias = tf.gather(self.node_b, self.rel_node)
-        self.score = tf.reduce_sum(tf.multiply(self.q_embedding, self.rel_embedding), 1) + self.i_bias
+
+        # look up embeddings
+        self.real_embedding = tf.nn.embedding_lookup(self.node_embed, self.real_node)
+        self.fake_embedding = tf.nn.embedding_lookup(self.node_embed, self.fake_node)
+
+        self.i_bias = tf.gather(self.node_b, self.fake_node)
+        self.score = tf.reduce_sum(tf.multiply(self.real_embedding, self.fake_embedding), 1) + self.i_bias
+
         # prediction loss
         self.pre_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.label, logits=self.score)) \
-                        + config.lambda_dis * (tf.nn.l2_loss(self.rel_embedding) + tf.nn.l2_loss(self.q_embedding) + tf.nn.l2_loss(self.i_bias))
+                        + config.lambda_dis * (tf.nn.l2_loss(self.fake_embedding) + tf.nn.l2_loss(self.real_embedding) + tf.nn.l2_loss(self.i_bias)) # l2 regularization
 
         d_opt = tf.train.AdamOptimizer(config.lr_dis)
         self.d_updates = d_opt.minimize(self.pre_loss)

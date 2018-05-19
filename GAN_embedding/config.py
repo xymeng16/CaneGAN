@@ -1,10 +1,15 @@
 import numpy as np
+from datetime import date
+
 batch_size_dis = 64  # batch size for discriminator
 batch_size_gen = 64  # batch size for generator
+
 lambda_dis = 1e-5  # l2 loss regulation factor for discriminator
 lambda_gen = 1e-5  # l2 loss regulation factor for generator
+
 n_sample_dis = 20  # sample num for generator
 n_sample_gen = 20  # sample num for discriminator
+
 update_ratio = 1    # updating ratio when choose the trees
 save_steps = 10
 
@@ -25,19 +30,13 @@ load_model = False  # if load the model for continual training
 gen_update_iter = 200
 window_size = 3
 
+n_embed = 128
+n_node = 19373
+pretrain_emd_filename = "../../pre_train/encode.emb"
+gene_network_filename = "../../data/encode.txt"
 
-
-random_state = np.random.randint(0, 100000)
-app = "link_prediction"
-train_filename = "../../data/" + app + "/others" + "/CA-GrQc_undirected_train.txt"
-test_filename = "../../data/link_prediction/CA-GrQc_test.txt"
-test_neg_filename = "../../data/link_prediction/CA-GrQc_test_neg.txt"
-n_embed = 50
-n_node = 5242
-pretrain_emd_filename_d = "../../pre_train/" + app + "/CA-GrQc_pre_train.emb"
-pretrain_emd_filename_g = "../../pre_train/" + app + "/CA-GrQc_pre_train.emb"
-modes = ["dis", "gen"]
-emb_filenames = ["../../pre_train/" + app + "/CA-GrQc_" + modes[0] + "_" + str(random_state) + ".emb",
-                 "../../pre_train/" + app + "/CA-GrQc_" +  modes[1] + "_" + str(random_state) + ".emb"]
-result_filename = "../../results/" + app + "/CA-GrQc_" +  str(random_state) + ".txt"
+models = ["dis", "gen"]
+emb_filenames = ["../../pre_train/" + models[0] + "_" + date.isoformat() + ".emb",
+                 "../../pre_train/" + models[1] + "_" + date.isoformat() + ".emb"]
+result_filename = "../../results/"+ date.isoformat() +".txt"
 
