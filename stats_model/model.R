@@ -1,28 +1,3 @@
-kde <- function(x, w = NA){
-  if(sum(is.na(w)) >0){
-    w <- seq(1,1,length.out = length(x))
-  }
-  n <- 100
-  r <- hist(x,n,plot = F)
-  p <- ceiling((x - min(r$breaks)) / (r$breaks[2] - r$breaks[1]))
-  mids <- r$mids
-  p[p<1] <- 1
-  p[p>length(mids)] <-length(mids)
-  weights <- seq(0,0,length.out = length(mids))
-  for(i in 1:length(mids)){
-    weights[i] <- sum(w[p==i])
-  }
-  m <- sum(weights * mids) / sum(weights)
-  s <- sqrt(sum((mids - m)^2) / sum(weights))
-  h <- 0.9 * min(s, quantile(mids)[4] - quantile(mids)[2])* length(mids)^(-0.2)
-  
-  dist <- matrix(rep(mids,length(mids)),nrow=length(mids)) - matrix(rep(mids,length(mids)),nrow=length(mids),byrow = T)
-  dens <- dnorm(dist / h)
-  y <- apply(dens * matrix(rep(weights,length(mids)),nrow=length(mids),byrow=T), 1, sum) / h / sum(weights)
-  
-  y <- y[p]
-  return(y)
-}
 
 sLDA <- function(z,v){
   n <- length(z)
@@ -37,17 +12,6 @@ sLDA <- function(z,v){
   return(y)
 }
 
-sLDA.2 <- function(z,v){
-  n <- length(z)
-  mu1 <- apply(v * z, 2, sum) / sum(z)
-  mu0 <- apply(v * (1-z), 2, sum) / sum(1-z)
-  mu <- (sum(z) * mu1 + sum(1 - z) * mu0) / n
-  Sb <- 1/n*(matrix((mu0-mu),ncol=1) %*% matrix((mu0-mu),nrow=1)*sum(1-z) + matrix((mu1-mu),ncol=1) %*% matrix((mu1-mu),nrow=1) * sum(z))
-  S <- 1/n*( t( z * (v - matrix(rep(mu1,n),nrow=n,byrow = T))) %*% (v - matrix(rep(mu1,n),nrow=n,byrow = T))  + t( (1-z) * (v - matrix(rep(mu0,n),nrow=n,byrow = T))) %*% (v - matrix(rep(mu0,n),nrow=n,byrow = T)) )
-  r <- eigen(solve(S + 1e-9 * diag(dim(S)[1])) %*% Sb)
-  lda.v <- as.numeric(r$vectors[,1])
-  return(lda.v)
-}
 
 EMinfer <- function(pvals){
   gene.num <- length(pvals)
@@ -238,114 +202,5 @@ model.LR <- function(pvalues,v,verbose=F, lambda=0, cv = 0){
 }
 
 
-model.NB <- function(pvalues,v,verbose=F){
-  # initilization
-  n <- dim(v)[1]
-  d <- dim(v)[2]
-  if(length(pvalues) != n){
-    print('Error : length of pvalues not equal to dim(v)[1] !')
-    return
-  }
-  
-  
-  r <- EMinfer(pvalues)
-  alpha0 <- r$alpha0
-  alpha1 <- r$alpha1
-  pi <- r$pi
-  mu0 <- seq(0,0,length.out = d)
-  mu1 <- seq(0,0,length.out = d)
-  sigma <- seq(1,1,length.out = d)
-  z <- seq(0,0,length.out = n)
-  
-  pvalues[pvalues < 1e-50] <- 1e-50
-  
-  loglik.history <- c()
-  i <- 0
-  while(1){
-    i <- i + 1
-    
-    # E-step
-    tmp0 <- log(1-pi) + log(alpha0) + (alpha0-1)*log(pvalues) - 1/2 * (sum(log(sigma)) + apply((v - matrix(rep(mu0,n),nrow=n,byrow = T))^2/matrix(rep(sigma,n),nrow=n,byrow=T),1,sum) )
-    tmp1 <- log(pi) + log(alpha1) + (alpha1-1)*log(pvalues) - 1/2 * (sum(log(sigma)) + apply((v - matrix(rep(mu1,n),nrow=n,byrow = T))^2/matrix(rep(sigma,n),nrow=n,byrow=T),1,sum) )
-    z <- 1 / (1 + exp(tmp0 - tmp1))
-    
-    max.tmp <- max(c(tmp1,tmp0))
-    loglik <- sum(log(exp(tmp1-max.tmp) + exp(tmp0-max.tmp)) + max.tmp)
-    loglik.history <- c(loglik.history,loglik)
-    
-    # M-step
-    pi <- sum(z) / n
-    alpha0 <- - sum(1-z) / sum((1-z) * log(pvalues))
-    alpha1 <- - sum(z) / sum(z * log(pvalues))
-    
-    mu0 <- apply(v * (1-z), 2, sum) / sum(1-z)
-    mu1 <- apply(v * z, 2, sum) / sum(z)
-    
-    sigma <- apply(1/n*(z * (v - matrix(rep(mu1,n),nrow=n,byrow = T))^2 + (1-z) * (v - matrix(rep(mu0,n),nrow=n,byrow = T))^2), 2, sum)
-    
-    if(verbose) print(sprintf('iter %02d , log(likelihood) %.6f',i,loglik))
-    
-    if(i > 10 && abs(loglik.history[i-10] - loglik.history[i]) < 1e-6 ) break;
-    if(i >= 5000) break;
-    if(i > 1 && loglik.history[i] < loglik.history[i-1]) break;
-    #print(roc(data[,'lab'],z)$auc)
-  }
-  
-  result <- list(loglik=loglik.history, post=z, alpha0=alpha0,alpha1=alpha1,pi=pi,mu0=mu0,mu1=mu1,sigma=sigma)
-  return(result)
-}
 
-model.MVN <- function(pvalues,v,verbose=F){
-  # initilization
-  n <- dim(v)[1]
-  d <- dim(v)[2]
-  if(length(pvalues) != n){
-    print('Error : length of pvalues not equal to dim(v)[1] !')
-    return
-  }
-  
-  r <- EMinfer(pvalues)
-  alpha0 <- r$alpha0
-  alpha1 <- r$alpha1
-  pi <- r$pi
-  mu0 <- seq(0,0,length.out = d)
-  mu1 <- seq(0,0,length.out = d)
-  sigma <- diag(d)
-  z <- seq(0,0,length.out = n)
-  
-  loglik.history <- c()
-  i <- 0
-  while(1){
-    i <- i + 1
-    
-    # E-step
-    tmp0 <- log(1-pi) + log(alpha0) + (alpha0-1)*log(pvalues) - 1/2 * (sum(log(det(sigma))) + apply( (v-matrix(rep(mu0,n),nrow=n,byrow = T)) %*% solve(sigma) * (v-matrix(rep(mu0,n),nrow=n,byrow = T)),1,sum) )
-    tmp1 <- log(pi) + log(alpha1) + (alpha1-1)*log(pvalues) - 1/2 * (sum(log(det(sigma) )) + apply( (v-matrix(rep(mu1,n),nrow=n,byrow = T)) %*% solve(sigma) * (v-matrix(rep(mu1,n),nrow=n,byrow = T)),1,sum) )
-    z <- 1 / (1 + exp(tmp0 - tmp1))
-    
-    
-    max.tmp <- max(c(tmp1,tmp0))
-    loglik <- sum(log(exp(tmp1-max.tmp) + exp(tmp0-max.tmp) + 1e-320) + max.tmp)
-    loglik.history <- c(loglik.history,loglik)
-    
-    # M-step
-    pi <- sum(z) / n
-    alpha0 <- - sum(1-z) / sum((1-z) * log(pvalues))
-    alpha1 <- - sum(z) / sum(z * log(pvalues))
-    
-    mu0 <- apply(v * (1-z), 2, sum) / sum(1-z)
-    mu1 <- apply(v * z, 2, sum) / sum(z)
-    
-    sigma <- 1/n*( t( z * (v - matrix(rep(mu1,n),nrow=n,byrow = T))) %*% (v - matrix(rep(mu1,n),nrow=n,byrow = T))  + t( (1-z) * (v - matrix(rep(mu0,n),nrow=n,byrow = T))) %*% (v - matrix(rep(mu0,n),nrow=n,byrow = T)) )
-    
-    if(verbose) print(sprintf('iter %02d , log(likelihood) %.6f',i,loglik))
-    
-    if(i > 10 && abs(loglik.history[i-10] - loglik.history[i]) < 1e-6 ) break;
-    if(i >= 5000) break;
-    if(i > 1 && loglik.history[i] < loglik.history[i-1]) break;
-    #print(roc(data[,'lab'],z)$auc)
-  }
-  
-  result <- list(loglik=loglik.history, post=z, alpha0=alpha0,alpha1=alpha1,pi=pi,mu0=mu0,mu1=mu1,sigma=sigma)
-  return(result)
-}
+
